@@ -200,7 +200,9 @@ export function createWeatherPanel({
         compact:
           summary.status ||
           summary.compact ||
-          (OBSERVED.has(id) ? detail?.replace(/^\d{2}-\d{2} /, '') : detail),
+          (id === 'wind'
+            ? `Forecast · valid ${utc(summary.validTime)}`
+            : detail),
         compactStatus: Boolean(summary.status),
         blocks,
       };

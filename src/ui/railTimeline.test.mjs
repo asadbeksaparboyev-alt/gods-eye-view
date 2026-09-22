@@ -107,6 +107,7 @@ test('observed history label and endpoint times track the advertised tick range'
     'Observed history',
   );
   const endpoints = f.find((n) => n.className === 'rail-timeline-endpoints');
+  assert.equal(endpoints.parent.className, 'rail-timeline-track');
   assert.deepEqual(
     endpoints.children.map((n) => n.textContent),
     ['01:00 UTC', '01:10 UTC'],

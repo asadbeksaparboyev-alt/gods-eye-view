@@ -44,17 +44,22 @@ export function createRailCards({
           element.dataset.cardId = card.id;
           const header = make('button', 'rail-card-header', element);
           header.type = 'button';
-          const heading = make('span', 'rail-card-heading', header);
+          const labels = make('span', 'rail-card-labels', header);
+          const heading = make('span', 'rail-card-heading', labels);
           const icon = make('span', 'data-icon', heading);
           icon.setAttribute('aria-hidden', 'true');
-          const title = make('span', 'rail-card-title', heading);
-          const disclosure = make('span', 'rail-card-disclosure', heading);
-          disclosure.setAttribute('aria-hidden', 'true');
+          const title = make(
+            'span',
+            'rail-card-title rail-card-nowrap',
+            heading,
+          );
           const badge = make(
             'span',
             `rail-card-badge${badgeClassName ? ` ${badgeClassName}` : ''}`,
-            header,
+            labels,
           );
+          const disclosure = make('span', 'rail-card-disclosure', header);
+          disclosure.setAttribute('aria-hidden', 'true');
           const compact = make('span', 'rail-card-compact', header);
           const body = make('div', 'rail-card-body', element);
           body.id = `rail-card-body-${++nextId}`;
@@ -81,6 +86,8 @@ export function createRailCards({
           rows.set(card.id, row);
         }
         set(row.title, 'textContent', card.title);
+        if (row.title.getAttribute('title') !== card.title)
+          row.title.setAttribute('title', card.title);
         set(row.icon, 'textContent', card.icon || '');
         set(row.icon, 'hidden', !card.icon);
         set(row.badge, 'textContent', card.badge || '');

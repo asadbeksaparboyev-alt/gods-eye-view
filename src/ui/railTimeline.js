@@ -59,9 +59,9 @@ export function createRailTimeline({
   const newest = document.createElement('span');
   endpoints.appendChild(oldest);
   endpoints.appendChild(newest);
+  row.appendChild(endpoints);
   if (heading) root.appendChild(label);
   root.appendChild(row);
-  root.appendChild(endpoints);
   root.appendChild(controls);
   container.appendChild(root);
   let props = {

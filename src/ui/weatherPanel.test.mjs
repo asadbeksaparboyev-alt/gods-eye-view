@@ -481,14 +481,41 @@ test('first appearance without storms chooses the first card and late storm arri
   view.destroy();
 });
 
-test('compact lines show observation age, forecast validity, storm selection or accented status', () => {
+test('compact lines show observation age, forecast validity, storm selection or accented status', (t) => {
+  t.mock.timers.enable({
+    apis: ['Date'],
+    now: Date.parse('2026-09-22T01:13:00Z'),
+  });
   const f = fixture();
   const view = createWeatherPanel(f);
   view.update([cyclone, wind, radar]);
   const compact = (id) =>
     f.find((n) => n.className.startsWith('rail-card-compact'), card(f, id));
-  assert.match(compact(radar.id).textContent, /^01:05 UTC · .*ago$/);
-  assert.match(compact(wind.id).textContent, /^Forecast · valid/);
+  assert.equal(compact(radar.id).textContent, '09-22 01:05 UTC · 8m ago');
+  assert.equal(
+    compact(wind.id).textContent,
+    'Forecast · valid 09-22 01:00 UTC',
+  );
+  f.state({ mode: 'history', target: ticks[1] });
+  assert.equal(
+    compact(radar.id).textContent,
+    '09-22 01:05 UTC · 8m ago · synced',
+  );
+  assert.equal(
+    compact(wind.id).textContent,
+    'Forecast · valid 09-22 01:00 UTC',
+  );
+  assert.match(
+    line(f, wind.id, 'time').textContent,
+    /issued .*Does not follow history/,
+  );
+  f.state({
+    products: [{ id: radar.id, shown: ticks[0], selected: ticks[0] }],
+  });
+  assert.equal(
+    compact(radar.id).textContent,
+    '09-22 01:00 UTC · 13m ago · nearest',
+  );
   clickHeader(f, wind.id);
   assert.equal(
     compact(cyclone.id).textContent,
@@ -519,12 +546,31 @@ test('all five headers retain descriptor icons and disclosure state when opened 
       const open = entry === active;
       assert.equal(article.dataset.open, String(open));
       assert.equal(article.classList.contains('is-open'), open);
-      const heading = article.children[0].children[0];
+      const header = article.children[0];
+      const labels = header.children[0];
+      const heading = labels.children[0];
+      assert.equal(
+        labels.children[1].textContent,
+        entry.summary.coverage || '',
+      );
+      assert.equal(
+        labels.children[1].classList.contains('rail-card-badge'),
+        true,
+      );
+      assert.equal(header.children[1].className, 'rail-card-disclosure');
       assert.equal(heading.children[0].className, 'data-icon');
       assert.equal(heading.children[0].textContent, entry.icon);
       assert.equal(heading.children[0].hidden, false);
       assert.equal(heading.children[1].textContent, entry.summary.label);
-      assert.equal(heading.children[2].textContent, open ? '▾' : '▸');
+      assert.equal(
+        heading.children[1].getAttribute('title'),
+        entry.summary.label,
+      );
+      assert.equal(
+        heading.children[1].classList.contains('rail-card-nowrap'),
+        true,
+      );
+      assert.equal(header.children[1].textContent, open ? '▾' : '▸');
     }
   }
   view.destroy();

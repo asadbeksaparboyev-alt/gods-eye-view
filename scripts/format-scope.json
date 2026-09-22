@@ -788,5 +788,6 @@
   "scripts/qa-weather-perf.mjs",
   "scripts/qa-weather-journey.mjs",
   "scripts/qa-weather-swap.mjs",
+  "scripts/qa-weather-teardown.mjs",
   "src/layers/weather/imageryHost.test.mjs"
 ]

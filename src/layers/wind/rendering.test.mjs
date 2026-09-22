@@ -1017,6 +1017,8 @@ test('scalar host replaces incompatible providers and retains imagery through no
   const tiled = items[0];
   assert.notEqual(tiled, original);
   assert.equal(tiled.provider.maximumLevel, 2);
+  assert.equal(tiled.provider.tileWidth, 512);
+  assert.equal(tiled.provider.tileHeight, 512);
   assert.equal(h.removed[0].destroy, true);
   assert.equal(h.textures.length, 2);
   assert.equal(h.textures[1].width, 720);

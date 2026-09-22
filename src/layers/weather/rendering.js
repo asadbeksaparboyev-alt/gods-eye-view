@@ -2,6 +2,7 @@ import { weatherTileUrl } from './source.js';
 import { orderWeatherImagery } from './imageryOrder.js';
 import { imageryHostStatus } from './imageryHost.js';
 import { createRasterTileProvider } from './rasterTiles.js';
+import { drapingProfile } from './drapingProfile.js';
 import { readResponseBytesCapped } from '../../sources/httpBody.js';
 import {
   acquireInfraredMosaic,
@@ -35,6 +36,58 @@ export function createWeatherRendering({
   const mosaics = new Map();
   let prefetchJob = null;
   let prefetchedKey = null;
+  let draping = null;
+  let offProfileCamera = null;
+
+  function profile(kind, product) {
+    if (kind === 'tileset') {
+      return product === 'clouds'
+        ? {
+            band: 'global',
+            tileSize: 512,
+            maximumLevel: GLOBAL_TILE_MAXIMUM_LEVEL,
+          }
+        : (draping ??
+            drapingProfile(viewer.camera?.positionCartographic?.height));
+    }
+    return {
+      tileSize: 256,
+      maximumLevel: product === 'clouds' ? GLOBAL_TILE_MAXIMUM_LEVEL : 6,
+    };
+  }
+  function sameProfile(frame, next) {
+    return (
+      frame.profile.tileSize === next.tileSize &&
+      frame.profile.maximumLevel === next.maximumLevel
+    );
+  }
+  function restage() {
+    const host = getHost();
+    if (
+      frameHidden ||
+      incoming ||
+      !current ||
+      imageryHostStatus(host, viewer.camera)
+    )
+      return;
+    if (
+      current.kind !== host.kind ||
+      !sameProfile(current, profile(host.kind, current.product))
+    )
+      void api.setFrame(current.snapshot, current.time, {
+        infrared: current.infrared,
+      });
+  }
+  function watchProfile() {
+    offProfileCamera ??= viewer.camera?.moveEnd?.addEventListener(() => {
+      if (getHost().kind === 'tileset')
+        draping = drapingProfile(
+          viewer.camera?.positionCartographic?.height,
+          draping?.band,
+        );
+      rehome();
+    });
+  }
 
   function cancelPrefetch() {
     clearTimeout(prefetchJob?.timeout);
@@ -81,7 +134,9 @@ export function createWeatherRendering({
       : bounds;
     if (!coverage) return [];
     const scheme = new cesium.GeographicTilingScheme();
-    const template = weatherTileUrl(snapshot.product, time);
+    const template = weatherTileUrl(snapshot.product, time, {
+      size: profile(getHost().kind, snapshot.product).tileSize,
+    });
     const urls = [];
     for (let z = 0; z <= 1; z++) {
       for (let y = 0; y < scheme.getNumberOfYTilesAtLevel(z); y++) {
@@ -135,7 +190,7 @@ export function createWeatherRendering({
     remove(previous);
     previous.resolve(false);
   }
-  function rehome() {
+  function rehome(rebuild = true) {
     const host = getHost();
     const { collection, kind } = host;
     const hidden =
@@ -161,8 +216,9 @@ export function createWeatherRendering({
         orderWeatherImagery(collection, current.layer, current.priority);
       }
     }
-    if (current && !hidden) current.kind = kind;
+    if (kind !== 'tileset') draping = null;
     if (changed || visibilityChanged) viewer.scene.requestRender();
+    if (rebuild) restage();
     return Boolean(changed || visibilityChanged);
   }
   const api = {
@@ -193,7 +249,7 @@ export function createWeatherRendering({
             urls.map(async (url) => {
               const response = await fetchImpl(url, { signal });
               if (!response.ok) throw new Error('Weather prefetch unavailable');
-              await readResponseBytesCapped(response, 1024 * 1024);
+              await readResponseBytesCapped(response, 4 * 1024 * 1024 + 65_536);
             }),
           );
         signal.throwIfAborted();
@@ -210,15 +266,20 @@ export function createWeatherRendering({
     async setFrame(snapshot, time, { signal, infrared = 'filtered' } = {}) {
       signal?.throwIfAborted();
       cancelPrefetch();
-      rehome();
+      rehome(false);
       cancelIncoming();
       const host = getHost();
       const { collection, kind } = host;
       if (imageryHostStatus(host, viewer.camera)) return false;
+      if (kind === 'tileset')
+        draping ??= drapingProfile(viewer.camera?.positionCartographic?.height);
+      watchProfile();
+      const nextProfile = profile(kind, snapshot.product);
       if (
         current?.time === time &&
         current.product === snapshot.product &&
         current.kind === kind &&
+        sameProfile(current, nextProfile) &&
         current.infrared === infrared
       )
         return true;
@@ -236,6 +297,7 @@ export function createWeatherRendering({
         controller: new AbortController(),
         collection,
         kind,
+        profile: nextProfile,
         priority:
           snapshot.product === 'lightning'
             ? 3
@@ -291,6 +353,9 @@ export function createWeatherRendering({
         frame.resolve(ok);
         viewer.scene.requestRender();
         onChange();
+        // A move may cross another band while acquisition is in flight. Finish
+        // the owned request first, then stage the latest profile exactly once.
+        if (ok) restage();
       };
       const abort = () => {
         if (incoming === frame) cancelIncoming();
@@ -339,16 +404,19 @@ export function createWeatherRendering({
               rectangle,
               tilingScheme,
               maximumLevel: GLOBAL_TILE_MAXIMUM_LEVEL,
+              tileSize: nextProfile.tileSize,
               credit,
               createCanvas,
             })
           : new cesium.UrlTemplateImageryProvider({
-              url: weatherTileUrl(snapshot.product, time),
+              url: weatherTileUrl(snapshot.product, time, {
+                size: nextProfile.tileSize,
+              }),
               tilingScheme,
               rectangle,
-              tileWidth: 256,
-              tileHeight: 256,
-              maximumLevel: 6,
+              tileWidth: nextProfile.tileSize,
+              tileHeight: nextProfile.tileSize,
+              maximumLevel: nextProfile.maximumLevel,
               enablePickFeatures: false,
               credit,
             });
@@ -471,6 +539,9 @@ export function createWeatherRendering({
       viewer.scene.requestRender();
     },
     clear() {
+      offProfileCamera?.();
+      offProfileCamera = null;
+      draping = null;
       cancelPrefetch();
       cancelIncoming();
       remove(current);
@@ -483,6 +554,10 @@ export function createWeatherRendering({
     },
     getDiagnostics() {
       return {
+        draping:
+          getHost().kind === 'tileset'
+            ? profile('tileset', (incoming || current)?.product)
+            : null,
         cache: { mosaics: mosaics.size, prefetching: !!prefetchJob },
         imageryCount:
           Number(!!current) + Number(!!incoming?.layer) + retiring.size,

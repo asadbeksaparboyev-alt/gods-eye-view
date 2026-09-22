@@ -8,6 +8,7 @@ export function createRasterTileProvider({
   rectangle = cesium.Rectangle.MAX_VALUE,
   tilingScheme = new cesium.GeographicTilingScheme({ rectangle }),
   maximumLevel = 2,
+  tileSize = 256,
 }) {
   const texture = decodedTexture ?? createCanvas();
   if (!decodedTexture) {
@@ -21,8 +22,8 @@ export function createRasterTileProvider({
   return {
     tilingScheme,
     rectangle,
-    tileWidth: 256,
-    tileHeight: 256,
+    tileWidth: tileSize,
+    tileHeight: tileSize,
     minimumLevel: 0,
     // Cesium 1.138 draping clamps coverage to maximumLevel - 1.
     maximumLevel,
@@ -35,7 +36,7 @@ export function createRasterTileProvider({
     pickFeatures: () => undefined,
     requestImage(x, y, level) {
       const tile = createCanvas();
-      tile.width = tile.height = 256;
+      tile.width = tile.height = tileSize;
       const ctx = tile.getContext('2d');
       const width =
         texture.width / tilingScheme.getNumberOfXTilesAtLevel(level);
@@ -50,8 +51,8 @@ export function createRasterTileProvider({
         height,
         0,
         0,
-        256,
-        256,
+        tileSize,
+        tileSize,
       );
       // ImageryLayer consumes requestImage results as promises.
       return Promise.resolve(tile);

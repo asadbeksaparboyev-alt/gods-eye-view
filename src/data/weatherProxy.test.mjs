@@ -887,3 +887,92 @@ test('exact frame tiles and images are immutable for a day; manifests and errors
     assert.equal(response.headers['Cache-Control'], 'no-store');
   }
 });
+
+for (const product of ['radar', 'clouds-regional', 'lightning']) {
+  test(`${product} sizes select WMS dimensions and distinct immutable cache entries`, async () => {
+    const maps = [];
+    const { request } = install({
+      fetchImpl: async (url) => {
+        if (url.includes('GetCapabilities')) return new Response(xml());
+        const params = new URL(url).searchParams;
+        maps.push(params);
+        return image(
+          png(Number(params.get('width')), Number(params.get('height'))),
+        );
+      },
+    });
+    const base = tile({ product, z: 3, x: 4, y: 2 });
+    for (const size of [256, 512, 1024]) {
+      const url = `${base}&size=${size}`;
+      const first = await request(url);
+      assert.equal(first.statusCode, 200);
+      assert.equal(
+        first.headers['Cache-Control'],
+        'public, max-age=86400, immutable',
+      );
+      assert.equal(first.body.readUInt32BE(16), size);
+      assert.equal(first.body.readUInt32BE(20), size);
+      assert.deepEqual((await request(url)).body, first.body);
+    }
+    assert.equal((await request(base)).statusCode, 200);
+    assert.deepEqual(
+      maps.map((p) => [p.get('width'), p.get('height')]),
+      [
+        ['256', '256'],
+        ['512', '512'],
+        ['1024', '1024'],
+      ],
+    );
+    assert.equal(new Set(maps.map((p) => p.get('bbox'))).size, 1);
+    const manifest = body(await request(`/manifest?product=${product}`));
+    assert.equal(manifest.tileSize, 256);
+    assert.equal(manifest.maxLevel, 6);
+  });
+}
+
+test('unsupported or duplicate sizes fail before upstream acquisition', async () => {
+  let calls = 0;
+  const { request } = install({
+    fetchImpl: async () => {
+      calls++;
+      throw new Error();
+    },
+  });
+  for (const size of [
+    '',
+    '0',
+    '257',
+    '2048',
+    '-256',
+    '0256',
+    '256.0',
+    '1e3',
+    '512&size=1024',
+  ]) {
+    const response = await request(`${tile()}&size=${size}`);
+    assert.equal(response.statusCode, 400, size);
+    assert.equal(response.headers['Cache-Control'], 'no-store');
+  }
+  assert.equal(calls, 0);
+});
+
+test('large tile validation checks requested dimensions and bounded compressed bytes', async () => {
+  for (const bytes of [
+    png(256, 256),
+    png(1024, 512),
+    png(1024, 1024, 4 * 1024 * 1024 + 65_537),
+  ]) {
+    const { request } = install({
+      fetchImpl: async (url) =>
+        url.includes('GetCapabilities') ? new Response(xml()) : image(bytes),
+    });
+    assert.equal((await request(`${tile()}&size=1024`)).statusCode, 503);
+  }
+  const { request } = install({
+    fetchImpl: async (url) =>
+      url.includes('GetCapabilities')
+        ? new Response(xml())
+        : image(png(1024, 1024, 2 * 1024 * 1024)),
+  });
+  assert.equal((await request(`${tile()}&size=1024`)).statusCode, 200);
+});

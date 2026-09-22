@@ -403,7 +403,7 @@ export function weatherProxy({
           ? ['product']
           : url.pathname === '/image'
             ? ['product', 'time']
-            : ['product', 'time', 'z', 'x', 'y'];
+            : ['product', 'time', 'z', 'x', 'y', 'size'];
       if (
         req.url.length > 512 ||
         [...url.searchParams.keys()].some(
@@ -416,6 +416,9 @@ export function weatherProxy({
       if (!Object.hasOwn(PRODUCTS, product))
         return json(res, 400, { error: 'unknown_weather_product' });
       const wholeImage = url.pathname === '/image';
+      const size = url.searchParams.get('size') ?? '256';
+      if (!['256', '512', '1024'].includes(size))
+        throw failure('invalid_weather_tile_size', 400);
       if (wholeImage && product !== 'clouds')
         throw failure('invalid_weather_image_product', 400);
       if (url.pathname === '/manifest') {
@@ -459,8 +462,14 @@ export function weatherProxy({
         : tileBounds;
       const imageShape = wholeImage
         ? { width: 2048, height: 1024, maxBytes: 4 * 1024 * 1024 }
-        : { width: 256, height: 256, maxBytes: 1024 * 1024 };
-      const key = `${product}:${time}:${wholeImage ? `image:${bbox.join(',')}` : `tile:${coords.join('/')}`}`;
+        : {
+            width: Number(size),
+            height: Number(size),
+            maxBytes: Math.max(1024 * 1024, Number(size) ** 2 * 4 + 65_536),
+          };
+      // NOAA WMS capabilities advertise no MaxWidth/MaxHeight. Radar, GOES and
+      // lightning GetMap requests support 1024 square pixels without composition.
+      const key = `${product}:${time}:${wholeImage ? `image:${bbox.join(',')}` : `tile:${size}:${coords.join('/')}`}`;
       let cached = tiles.get(key);
       if (cached && now() - cached.at <= 24 * HOUR) {
         tiles.delete(key);

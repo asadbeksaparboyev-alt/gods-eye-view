@@ -50,11 +50,13 @@ export function weatherImageUrl(time) {
   return `/api/weather/image?product=clouds&time=${encodeURIComponent(time)}`;
 }
 
-export function weatherTileUrl(product, time) {
+export function weatherTileUrl(product, time, { size } = {}) {
   if (!WEATHER_PRODUCTS.includes(product) || !Number.isFinite(Date.parse(time)))
     throw new Error('Invalid weather frame');
+  if (size !== undefined && ![256, 512, 1024].includes(size))
+    throw new Error('Invalid weather tile size');
   // Construct locally; never accept a manifest-provided host or template.
-  return `/api/weather/tile?product=${product}&time=${encodeURIComponent(time)}&z={z}&x={x}&y={y}`;
+  return `/api/weather/tile?product=${product}&time=${encodeURIComponent(time)}&z={z}&x={x}&y={y}${size === undefined ? '' : `&size=${size}`}`;
 }
 
 /** Acquisition is lazy and shares the application's existing source contract. */

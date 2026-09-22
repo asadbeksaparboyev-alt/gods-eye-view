@@ -350,6 +350,8 @@ export function createWindRendering({
         provider = createRasterTileProvider({
           cesium,
           raster,
+          tileSize: 512,
+          maximumLevel: 2,
           credit: new cesium.Credit(
             snapshot.model === 'ifs' ? 'ECMWF IFS' : 'NOAA GFS',
             false,

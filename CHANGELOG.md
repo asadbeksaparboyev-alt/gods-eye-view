@@ -2,6 +2,11 @@
 
 ## Unreleased — weather review
 
+- Use altitude-banded 1024 px weather tiles on 3D Tiles to reduce per-primitive
+  texture demand, with move-end hysteresis and retained-frame swaps. Use 512 px
+  global mosaic and wind crops; keep globe profiles and visual order unchanged.
+  Accept bounded tile sizes in the proxy with separate immutable cache entries.
+
 - Cache exact-time weather images and tiles for 24 hours. Retain up to 6 decoded
   global mosaics per renderer and warm the next observation during playback;
   tile prefetch is bounded to eight requests and cancels when suspended.

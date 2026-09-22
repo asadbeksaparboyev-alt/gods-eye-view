@@ -64,3 +64,23 @@ test('source aborts before acquisition and caps streamed manifest bytes', async 
   assert.equal(calls, 0);
   await assert.rejects(source.getSnapshot(), /too large/);
 });
+
+test('weather tile URLs carry only supported optional pixel sizes', () => {
+  assert.equal(
+    new URL(
+      weatherTileUrl('radar', time),
+      'https://example.test',
+    ).searchParams.has('size'),
+    false,
+  );
+  for (const size of [256, 512, 1024]) {
+    const url = new URL(
+      weatherTileUrl('lightning', time, { size }),
+      'https://example.test',
+    );
+    assert.equal(url.searchParams.get('size'), String(size));
+    assert.equal(url.searchParams.get('time'), time);
+  }
+  for (const size of [0, 257, 2048, '1024', null])
+    assert.throws(() => weatherTileUrl('radar', time, { size }), /tile size/);
+});

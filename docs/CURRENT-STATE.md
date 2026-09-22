@@ -63,6 +63,22 @@ history while metadata refresh continues, then resumes when a host returns.
 On 3D Tiles, observed weather imagery hides below 60 km camera height to avoid
 re-mapping dense tiles; it retains the shown frame and playback intent, then
 resumes at or above 60 km. Globe hosts are unaffected.
+On 3D Tiles, radar, regional infrared and lightning use 1024 px tiles with
+maximum levels 5 below 400 km, 4 from 400 km through 1.5 Mm, and 3 above
+1.5 Mm. Band changes use 10% hysteresis on camera move-end and stage the
+retained observation through the existing frame swap. Cesium clamps draping
+to maximumLevel - 1 and truncates imagery above 10 textures per primitive;
+the coarser coverage reduces texture demand without changing layer order.
+Globe tiled products retain 256 px / maximum level 6. Global mosaic crops use
+maximum level 3 on both hosts; wind color fields use 512 px / maximum level 2
+on 3D Tiles and retain the single raster on globe hosts. Diagnostics expose
+the draping band, tile size and maximum level (null on globe hosts).
+The tile proxy accepts size=256 (default), 512 or 1024 and keys cached bytes
+by size, retaining the 24-hour immutable response and eight upstream slots.
+NOAA radar, regional infrared and lightning returned 1024×1024 PNGs in a
+live request check; their WMS capabilities advertise no image-size maximum.
+Google-host altitude coverage, simultaneous four-layer texture counts and
+transition visibility still require the browser altitude probe.
 Clouds only applies a soft brightness ramp to decoded pixels once, using
 Cesium's sRGB-to-linear conversion (`channel ** 2.2`) and smoothstep from 0.40
 to 0.70. The old 0.55 threshold is the ramp midpoint. RGB and source alpha are
@@ -70,10 +86,12 @@ preserved in Full image mode; both modes use the chosen layer opacity. This
 is a display filter, not a cloud mask. Satellite share links retain the display
 mode; observation history remains transient and links open latest.
 Global infrared fetches one capped 4 MiB, 2048×1024 mosaic per frame and decodes
-and processes it before staging. Both hosts crop that canvas into 256 px tiles
-on a geographic 2×1 root grid bounded to the manifest extent, avoiding
+and processes it before staging. Globe hosts crop that canvas into 256 px tiles;
+3D Tiles hosts use 512 px crops on a geographic 2×1 root grid bounded to the
+manifest extent, avoiding
 request-dependent contrast seams. Maximum level 3 accommodates Cesium 1.138's
-`maximumLevel - 1` draping coverage clamp. Rehoming reuses the decoded provider.
+`maximumLevel - 1` draping coverage clamp. Rehoming rebuilds crop providers
+while reusing the decoded mosaic.
 Regional infrared retains network tiles and processes each decoded tile once.
 Exact-time tile and image responses are immutable for 24 hours; manifests and
 errors remain uncached. Each weather renderer retains up to 6 processed global

@@ -235,7 +235,7 @@ test('camera movement drops abandoned deferred tiles but still waits for admitte
   h.viewer.camera = { moveEnd };
   h.viewer.scene.globe.tilesLoaded = false;
   const stage = h.rendering.setFrame(snapshot, times[0]);
-  assert.equal(moveEnd.size, 1);
+  assert.equal(moveEnd.size, 2);
   const provider = h.providers[0];
   const first = deferred();
   provider.response = first;
@@ -291,11 +291,11 @@ test('camera movement drops abandoned deferred tiles but still waits for admitte
   assert.equal(h.rendering.getDiagnostics().time, times[0]);
   assert.equal(
     moveEnd.size,
-    0,
-    'committing releases the stage camera listener',
+    1,
+    'committing leaves only the profile camera listener',
   );
   const abandoned = h.rendering.setFrame(snapshot, times[1]);
-  assert.equal(moveEnd.size, 1);
+  assert.equal(moveEnd.size, 2);
   h.rendering.clear();
   assert.equal(await abandoned, false);
   assert.equal(
@@ -869,14 +869,15 @@ test('tileset frames require own loaded tiles and rehome cancels staging while p
   assert.equal(h.rendering.rehome(), true);
   assert.equal(await incoming, false);
   assert.equal(tiles.length, 0);
-  assert.deepEqual(h.layers, [cloud, radar, lightning]);
+  assert.deepEqual(h.layers, [cloud, radar, h.layers[2], lightning]);
+  assert.equal(h.layers[2].imageryProvider.options.tileWidth, 256);
   assert.equal(h.rendering.getDiagnostics().time, times[0]);
   assert.equal(radar.isDestroyed(), false);
   host = { collection: null, kind: 'none' };
   h.rendering.rehome();
   assert.deepEqual(h.layers, [cloud, lightning]);
   assert.equal(await h.rendering.setFrame(snapshot, times[2]), false);
-  assert.equal(h.providers.length, 2);
+  assert.equal(h.providers.length, 3);
   assert.equal(h.rendering.getDiagnostics().error, NO_IMAGERY_HOST);
   host = { collection: tiles, kind: 'tileset' };
   h.rendering.rehome();
@@ -1059,8 +1060,8 @@ for (const kind of ['globe', 'tileset']) {
     const provider = layer.imageryProvider;
     assert.ok(provider.tilingScheme instanceof Cesium.GeographicTilingScheme);
     assert.equal(provider.maximumLevel, 3);
-    assert.equal(provider.tileWidth, 256);
-    assert.equal(provider.tileHeight, 256);
+    assert.equal(provider.tileWidth, kind === 'tileset' ? 512 : 256);
+    assert.equal(provider.tileHeight, kind === 'tileset' ? 512 : 256);
     assert.equal(provider.tilingScheme.getNumberOfXTilesAtLevel(0), 2);
     assert.equal(provider.tilingScheme.getNumberOfYTilesAtLevel(0), 1);
     assert.ok(
@@ -1076,7 +1077,7 @@ for (const kind of ['globe', 'tileset']) {
   });
 }
 
-test('global infrared rehomes the decoded provider without reacquiring or changing mode', async () => {
+test('global infrared rehomes with a new crop profile without reacquiring or changing mode', async () => {
   const globe = new ImageryLayerCollection();
   let host = { collection: globe, kind: 'globe' },
     fetches = 0;
@@ -1101,7 +1102,9 @@ test('global infrared rehomes the decoded provider without reacquiring or changi
   h.rendering.rehome();
   assert.equal(tiles.length, 1);
   assert.equal(tiles.get(0), layer);
-  assert.equal(h.rendering.getDiagnostics().loading, false);
+  assert.equal(h.rendering.getDiagnostics().loading, true);
+  await flush();
+  assert.equal(tiles.get(1).imageryProvider.tileWidth, 512);
   assert.equal(h.rendering.getDiagnostics().infrared, 'full');
   host = { collection: null, kind: 'none' };
   h.rendering.rehome();
@@ -2071,4 +2074,236 @@ test('layer warms the next advertised observation only after a successful playin
   h.stages.at(-1).finish();
   await flush();
   assert.equal(warmed.length, 2, 'hidden products do not prefetch');
+});
+
+for (const product of ['radar', 'clouds-regional', 'lightning']) {
+  for (const [height, band, maximumLevel] of [
+    [60_000, 'low', 5],
+    [600_000, 'middle', 4],
+    [1_600_000, 'high', 3],
+  ]) {
+    for (const kind of ['globe', 'tileset']) {
+      test(`${product} at ${height} on ${kind} uses the host pixel size and level`, async (t) => {
+        const collection = new ImageryLayerCollection();
+        const h = renderingHarness({ getHost: () => ({ collection, kind }) });
+        t.after(() => h.rendering.clear());
+        h.viewer.camera = {
+          moveEnd: event(),
+          positionCartographic: { height },
+        };
+        const pending = h.rendering.setFrame(
+          { ...snapshot, product },
+          times[0],
+        );
+        const options = h.providers[0].options;
+        const size = kind === 'tileset' ? 1024 : 256;
+        assert.equal(options.tileWidth, size);
+        assert.equal(options.tileHeight, size);
+        assert.equal(
+          options.maximumLevel,
+          kind === 'tileset' ? maximumLevel : 6,
+        );
+        assert.equal(
+          new URL(options.url, 'https://example.test').searchParams.get('size'),
+          String(size),
+        );
+        assert.deepEqual(
+          h.rendering.getDiagnostics().draping,
+          kind === 'tileset' ? { band, tileSize: 1024, maximumLevel } : null,
+        );
+        h.rendering.clear();
+        assert.equal(await pending, false);
+        assert.equal(h.viewer.camera.moveEnd.size, 0);
+      });
+    }
+  }
+}
+
+test('moveEnd restages the same frame once per band and retains the visible frame until ready', async (t) => {
+  let now = 0;
+  const collection = new ImageryLayerCollection();
+  const h = renderingHarness({
+    getHost: () => ({ collection, kind: 'tileset' }),
+    now: () => now,
+  });
+  t.after(() => h.rendering.clear());
+  const camera = {
+    moveEnd: event(),
+    positionCartographic: { height: 300_000 },
+  };
+  h.viewer.camera = camera;
+  async function complete(provider) {
+    provider.response = { promise: Promise.resolve({}) };
+    await provider.requestImage(0, 0, 0);
+    now += 250;
+    h.settle();
+  }
+  const first = h.rendering.setFrame(snapshot, times[1]);
+  await complete(h.providers[0]);
+  assert.equal(await first, true);
+  const original = collection.get(0);
+  camera.positionCartographic.height = 500_000;
+  h.postRender.emit();
+  assert.equal(h.providers.length, 1, 'only moveEnd changes the profile');
+  camera.moveEnd.emit();
+  assert.equal(h.providers.length, 2);
+  assert.equal(h.providers[1].options.maximumLevel, 4);
+  assert.equal(original.show, true);
+  assert.equal(collection.get(1).alpha, 0);
+  assert.equal(h.rendering.getDiagnostics().time, times[1]);
+  for (const height of [399_000, 420_000, 600_000]) {
+    camera.positionCartographic.height = height;
+    camera.moveEnd.emit();
+  }
+  assert.equal(h.providers.length, 2, 'same band does not restart acquisition');
+  await complete(h.providers[1]);
+  assert.equal(h.providers.length, 2);
+  assert.equal(
+    collection.length,
+    2,
+    'old frame retires after the replacement renders',
+  );
+  h.postRender.emit();
+  assert.equal(collection.length, 1);
+  assert.equal(original.isDestroyed(), true);
+  for (let i = 0; i < 5; i++) {
+    camera.moveEnd.emit();
+    h.settle();
+  }
+  assert.equal(h.providers.length, 2, 'settling cannot loop');
+  camera.positionCartographic.height = 350_000;
+  camera.moveEnd.emit();
+  assert.equal(h.providers.length, 3);
+  assert.equal(h.providers[2].options.maximumLevel, 5);
+  h.rendering.clear();
+  assert.equal(camera.moveEnd.size, 0);
+});
+
+test('band changes during history acquisition preserve the requested time and converge once', async (t) => {
+  let now = 0;
+  const collection = new ImageryLayerCollection();
+  const h = renderingHarness({
+    getHost: () => ({ collection, kind: 'tileset' }),
+    now: () => now,
+  });
+  t.after(() => h.rendering.clear());
+  h.viewer.camera = {
+    moveEnd: event(),
+    positionCartographic: { height: 300_000 },
+  };
+  const pending = h.rendering.setFrame(snapshot, times[2]);
+  h.viewer.camera.positionCartographic.height = 2_000_000;
+  h.viewer.camera.moveEnd.emit();
+  assert.equal(
+    h.providers.length,
+    1,
+    'owned history acquisition is not cancelled',
+  );
+  h.providers[0].response = { promise: Promise.resolve({}) };
+  await h.providers[0].requestImage(0, 0, 0);
+  now = 250;
+  h.settle();
+  assert.equal(await pending, true);
+  assert.equal(h.providers.length, 2);
+  assert.equal(h.providers[1].options.maximumLevel, 3);
+  assert.match(
+    h.providers[1].options.url,
+    new RegExp(encodeURIComponent(times[2])),
+  );
+  h.providers[1].response = { promise: Promise.resolve({}) };
+  await h.providers[1].requestImage(0, 0, 0);
+  now = 500;
+  h.settle();
+  h.postRender.emit();
+  assert.equal(h.providers.length, 2);
+  assert.equal(h.rendering.getDiagnostics().loading, false);
+  assert.equal(h.rendering.getDiagnostics().time, times[2]);
+});
+
+test('global mosaic keeps one 512-pixel profile through altitude bands', async (t) => {
+  const collection = new ImageryLayerCollection();
+  let now = 0;
+  const h = renderingHarness({
+    getHost: () => ({ collection, kind: 'tileset' }),
+    now: () => now,
+  });
+  t.after(() => h.rendering.clear());
+  h.viewer.camera = {
+    moveEnd: event(),
+    positionCartographic: { height: 70_000 },
+  };
+  const pending = h.rendering.setFrame(
+    { ...snapshot, product: 'clouds' },
+    times[0],
+  );
+  await flush();
+  await collection.get(0).imageryProvider.requestImage(0, 0, 0);
+  now = 250;
+  h.settle();
+  assert.equal(await pending, true);
+  h.viewer.camera.positionCartographic.height = 2_000_000;
+  h.viewer.camera.moveEnd.emit();
+  assert.equal(collection.length, 1);
+  assert.deepEqual(h.rendering.getDiagnostics().draping, {
+    band: 'global',
+    tileSize: 512,
+    maximumLevel: 3,
+  });
+});
+
+test('host changes rebuild the tiled provider in both directions at the retained time', async (t) => {
+  let now = 0;
+  let host;
+  const globe = new ImageryLayerCollection();
+  const h = renderingHarness({ getHost: () => host, now: () => now });
+  t.after(() => h.rendering.clear());
+  h.viewer.camera = {
+    moveEnd: event(),
+    positionCartographic: { height: 600_000 },
+  };
+  host = { collection: globe, kind: 'globe' };
+  const pending = h.rendering.setFrame(snapshot, times[1]);
+  h.settle();
+  assert.equal(await pending, true);
+  const tiles = new ImageryLayerCollection();
+  host = { collection: tiles, kind: 'tileset' };
+  h.rendering.rehome();
+  assert.equal(h.providers.length, 2);
+  assert.equal(h.providers[1].options.tileWidth, 1024);
+  assert.equal(h.providers[1].options.maximumLevel, 4);
+  h.providers[1].response = { promise: Promise.resolve({}) };
+  await h.providers[1].requestImage(0, 0, 0);
+  now = 250;
+  h.settle();
+  h.postRender.emit();
+  assert.equal(tiles.length, 1);
+  assert.equal(h.rendering.getDiagnostics().time, times[1]);
+  host = { collection: globe, kind: 'globe' };
+  h.rendering.rehome();
+  assert.equal(h.providers.length, 3);
+  assert.equal(h.providers[2].options.tileWidth, 256);
+  assert.equal(h.providers[2].options.maximumLevel, 6);
+  h.settle();
+  h.postRender.emit();
+  assert.equal(globe.length, 1);
+  assert.equal(tiles.length, 0);
+  assert.equal(h.rendering.getDiagnostics().draping, null);
+  assert.equal(h.rendering.getDiagnostics().time, times[1]);
+});
+
+test('diagnostics before enable do not lock a stale camera band', async (t) => {
+  let host;
+  const h = renderingHarness({ getHost: () => host });
+  t.after(() => h.rendering.clear());
+  host = { collection: h.viewer.imageryLayers, kind: 'tileset' };
+  h.viewer.camera = {
+    moveEnd: event(),
+    positionCartographic: { height: 2_000_000 },
+  };
+  assert.equal(h.rendering.getDiagnostics().draping.band, 'high');
+  h.viewer.camera.positionCartographic.height = 60_000;
+  const pending = h.rendering.setFrame(snapshot, times[0]);
+  assert.equal(h.providers[0].options.maximumLevel, 5);
+  h.rendering.clear();
+  assert.equal(await pending, false);
 });

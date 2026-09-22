@@ -125,3 +125,27 @@ test('bounded decoded mosaic crops both roots and higher levels without resampli
     assert.deepEqual(tile.crop, crop);
   }
 });
+
+test('512-pixel crops preserve source extent at root and clamped draping levels', async () => {
+  const texture = { width: 2048, height: 1024 };
+  const provider = createRasterTileProvider({
+    cesium: Cesium,
+    texture,
+    createCanvas,
+    tileSize: 512,
+    maximumLevel: 3,
+  });
+  assert.equal(provider.tileWidth, 512);
+  assert.equal(provider.tileHeight, 512);
+  for (const [x, y, level, crop] of [
+    [0, 0, 0, [0, 0, 1024, 1024, 0, 0, 512, 512]],
+    [3, 1, 1, [1536, 512, 512, 512, 0, 0, 512, 512]],
+    [7, 3, 2, [1792, 768, 256, 256, 0, 0, 512, 512]],
+  ]) {
+    const tile = await provider.requestImage(x, y, level);
+    assert.equal(tile.width, 512);
+    assert.equal(tile.height, 512);
+    assert.equal(tile.source, texture);
+    assert.deepEqual(tile.crop, crop);
+  }
+});

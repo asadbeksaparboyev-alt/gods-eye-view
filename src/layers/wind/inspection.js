@@ -42,17 +42,18 @@ export function inspectWindAtCenter(
   snapshot,
   viewer,
   cesium,
-  { units, overlay, model, validTime, status } = {},
+  { units, overlay, model, validTime, status, position } = {},
 ) {
   const scene = viewer?.scene;
   const canvas = scene?.canvas;
   const ellipsoid = scene?.globe?.ellipsoid || cesium.Ellipsoid?.WGS84;
   const point =
-    canvas &&
-    viewer.camera?.pickEllipsoid?.(
-      new cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2),
-      ellipsoid,
-    );
+    position ||
+    (canvas &&
+      viewer.camera?.pickEllipsoid?.(
+        new cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2),
+        ellipsoid,
+      ));
   if (!point || !snapshot?.u || !snapshot?.v)
     return {
       coordinates: 'No surface reading',
@@ -83,16 +84,21 @@ export function inspectWindAtCenter(
     units,
     coordinates: `${Math.abs(lat).toFixed(2)}°${lat < 0 ? 'S' : 'N'} · ${Math.abs(lon).toFixed(2)}°${lon < 0 ? 'W' : 'E'}`,
     wind: `${formatWindSpeed(speed, units)}${from === 'Calm' ? ' · calm' : ` from ${from}`}`,
+    scalarKind: overlay,
     scalarLabel:
-      overlay === 'temperature'
-        ? 'Air temperature · 2 m'
-        : overlay === 'pressure'
-          ? 'Sea-level pressure'
-          : null,
+      overlay === 'speed'
+        ? 'Wind speed'
+        : overlay === 'temperature'
+          ? 'Air temperature · 2 m'
+          : overlay === 'pressure'
+            ? 'Sea-level pressure'
+            : null,
     scalarValue:
-      scalar == null
-        ? null
-        : `${scalar.toFixed(1)} ${overlay === 'temperature' ? '°C' : 'hPa'}`,
+      overlay === 'speed'
+        ? formatWindSpeed(speed, units)
+        : scalar == null
+          ? null
+          : `${scalar.toFixed(1)} ${overlay === 'temperature' ? '°C' : 'hPa'}`,
     model,
     validTime,
     status,

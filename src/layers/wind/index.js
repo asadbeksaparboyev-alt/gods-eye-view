@@ -3,7 +3,7 @@ import { createWindRendering } from './rendering.js';
 import { WIND_FIELDS } from './fields.js';
 import {
   formatWindReading,
-  windReadingSection,
+  windReadingResult,
   windUnitChips,
 } from './presentation.js';
 import {
@@ -55,9 +55,28 @@ export function createWindLayer({
   let units = 'km/h';
   let reading = null;
   let inspectionMarker = null;
+  let sampledPosition = null;
   const hideInspection = () => {
     reading = null;
+    sampledPosition = null;
     inspectionMarker?.clear();
+  };
+  const sample = (position) => {
+    reading = inspectWindAtCenter(manifest, viewer, cesium, {
+      position,
+      units,
+      overlay,
+      model: model === 'ifs' ? 'ECMWF' : 'GFS',
+      validTime:
+        formatWindValidTime(manifest?.cycle?.validIso) || 'Unavailable',
+      status: loading
+        ? 'Loading forecast'
+        : error ||
+          manifest?.reason ||
+          (manifest?.stale ? 'Cached forecast · stale' : 'Model forecast'),
+    });
+    sampledPosition = reading.position || position || null;
+    inspectionMarker?.show(sampledPosition);
   };
   const requestedScalar = () =>
     ['temperature', 'pressure'].includes(overlay) ? overlay : 'none';
@@ -129,7 +148,6 @@ export function createWindLayer({
       request = controller;
       generation += 1;
       loading = true;
-      hideInspection();
       notify();
       try {
         signal?.throwIfAborted();
@@ -142,6 +160,7 @@ export function createWindLayer({
           return false;
         manifest = snapshot;
         error = null;
+        if (sampledPosition) sample(sampledPosition);
         if (snapshot.unavailable) {
           rendering.stop();
           rendering.clear();
@@ -178,8 +197,7 @@ export function createWindLayer({
       if (modelChanged) model = params.model;
       if (overlayChanged) overlay = params.overlay;
       rendering?.setOptions?.({ overlay, paused });
-      if (modelChanged || overlayChanged) hideInspection();
-      else if (unitsChanged) reading = formatWindReading(reading, units);
+      if (unitsChanged) reading = formatWindReading(reading, units);
       if (params.inspect === false) hideInspection();
       if (modelChanged) {
         manifest = null;
@@ -211,20 +229,10 @@ export function createWindLayer({
         else if (enabled && manifest && !manifest.unavailable)
           rendering?.start();
       }
+      if (overlayChanged && !needsField && sampledPosition)
+        sample(sampledPosition);
       if (params.inspect === true && enabled) {
-        reading = inspectWindAtCenter(manifest, viewer, cesium, {
-          units,
-          overlay,
-          model: model === 'ifs' ? 'ECMWF IFS' : 'NOAA GFS',
-          validTime:
-            formatWindValidTime(manifest?.cycle?.validIso) || 'Unavailable',
-          status: loading
-            ? 'Loading forecast'
-            : error ||
-              manifest?.reason ||
-              (manifest?.stale ? 'Cached forecast · stale' : 'Model forecast'),
-        });
-        inspectionMarker?.show(reading.position);
+        sample();
       }
       notify();
     },
@@ -324,7 +332,7 @@ export function createWindLayer({
           ...['none', 'speed', 'pressure', 'temperature'].map((value) => ({
             id: `overlay-${value}`,
             label: {
-              none: 'No color field',
+              none: 'None',
               speed: 'Speed',
               pressure: 'Pressure',
               temperature: 'Temperature',
@@ -338,18 +346,22 @@ export function createWindLayer({
               temperature: 'Air temperature two meters above the surface',
             }[value],
           })),
-          ...(speedLegendVisible ? Object.keys(WIND_UNITS) : []).map(
-            (value) => ({
-              id: `units-${value}`,
-              label: value,
-              active: units === value,
-              params: { units: value },
-              title: 'Wind speed units',
-            }),
-          ),
+          ...(speedLegendVisible ||
+          diagnostic?.renderMode === 'canvas-fallback' ||
+          Number.isFinite(reading?.speed)
+            ? Object.keys(WIND_UNITS)
+            : []
+          ).map((value) => ({
+            id: `units-${value}`,
+            label: value,
+            active: units === value,
+            params: { units: value },
+            title: 'Wind speed units',
+          })),
           {
-            id: 'inspect-center',
-            label: 'Inspect center',
+            id: 'read-wind',
+            label: 'Read wind here',
+            hint: 'at map center',
             params: { inspect: true },
             disabled: loading || !manifest?.u || manifest?.unavailable,
             title:
@@ -367,14 +379,23 @@ export function createWindLayer({
           'Surface wind at 10 m. Approximately 1° global grid. Curves follow the 10 m wind field, lifted 12 km for visibility; display height is not weather altitude. View lighting is for readability. Animation shows flow through one fixed forecast; it does not advance time. Color fields drape the globe basemap or the active photorealistic 3D Tiles.',
       };
       controls.summary.reading = reading;
-      const settingsChips = controls.chips.filter(
-        ({ id }) => !id.startsWith('units-'),
-      );
-      settingsChips.splice(-1, 0, ...windUnitChips(units));
-      controls.summary.sections = [
-        { id: 'settings', label: 'Settings', chips: settingsChips },
-        ...(reading ? [windReadingSection(reading)] : []),
+      controls.summary.result = reading ? windReadingResult(reading) : null;
+      const setting = (id, label, prefix) => ({
+        id,
+        label,
+        chips: controls.chips.filter((chip) => chip.id.startsWith(prefix)),
+      });
+      controls.summary.settings = [
+        setting('model', 'MODEL', 'model-'),
+        setting('field', 'FIELD', 'overlay-'),
+        ...(controls.chips.some(({ id }) => id.startsWith('units-'))
+          ? [{ id: 'units', label: 'UNITS', chips: windUnitChips(units) }]
+          : []),
+        setting('motion', 'MOTION', 'motion'),
       ];
+      controls.summary.actions = controls.chips.filter(
+        ({ id }) => id === 'read-wind',
+      );
       return controls;
     },
 

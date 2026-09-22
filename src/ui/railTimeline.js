@@ -11,6 +11,7 @@ export function createRailTimeline({
   container,
   document = container?.ownerDocument,
   sliderClassName = '',
+  heading = true,
   onCommit = () => {},
   onPreview = () => {},
   onStep = () => {},
@@ -58,7 +59,7 @@ export function createRailTimeline({
   const newest = document.createElement('span');
   endpoints.appendChild(oldest);
   endpoints.appendChild(newest);
-  root.appendChild(label);
+  if (heading) root.appendChild(label);
   root.appendChild(row);
   root.appendChild(endpoints);
   root.appendChild(controls);

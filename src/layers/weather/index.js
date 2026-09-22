@@ -601,7 +601,7 @@ export function createWeatherLayer({
                 },
                 {
                   id: 'full',
-                  label: 'Full image',
+                  label: 'Full',
                   active: infrared === 'full',
                   params: { infrared: 'full' },
                   title: 'The complete infrared image at the chosen opacity',
@@ -645,9 +645,30 @@ export function createWeatherLayer({
             ? 'NOAA MRMS radar echoes indicate precipitation patterns, not rain rate, a storm warning or a future forecast. Native source approximately 1 km; display is limited to level 6. Frames use exact advertised observation times.'
             : 'GOES-19/18 longwave infrared Band 14 regional; NESDIS global longwave mosaic. Clouds only dims everything but bright, cold cloud tops; a brightness filter, not a cloud mask. Coverage and freshness differ by region.',
       };
-      controls.summary.sections = [
-        { id: 'settings', label: 'Settings', chips: controls.chips },
+      controls.summary.settings = [
+        ...(satellite
+          ? [
+              {
+                id: 'region',
+                label: 'REGION',
+                chips: controls.chips.filter(({ params }) => params.product),
+              },
+              {
+                id: 'image',
+                label: 'IMAGE',
+                chips: controls.chips.filter(({ params }) => params.infrared),
+              },
+            ]
+          : []),
+        {
+          id: 'opacity',
+          label: 'OPACITY',
+          chips: controls.chips.filter(({ params }) => params.opacity),
+        },
       ];
+      controls.summary.actions = controls.chips.filter(
+        ({ id }) => id === 'coverage',
+      );
       return controls;
     },
     setRowControlsListener(value) {

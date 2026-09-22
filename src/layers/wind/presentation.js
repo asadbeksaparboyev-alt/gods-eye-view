@@ -6,6 +6,10 @@ export function formatWindReading(reading, units) {
   return {
     ...reading,
     units,
+    scalarValue:
+      reading.scalarKind === 'speed'
+        ? formatWindSpeed(reading.speed, units)
+        : reading.scalarValue,
     wind: Number.isFinite(reading.speed)
       ? `${formatWindSpeed(reading.speed, units)}${reading.from === 'Calm' ? ' · calm' : ` from ${reading.from}`}`
       : reading.wind,
@@ -22,14 +26,16 @@ export function windUnitChips(units) {
   }));
 }
 
-/** Portable reading section consumed by the WEATHER card. */
-export function windReadingSection(reading) {
+/** Portable result block consumed by the WEATHER card. */
+export function windReadingResult(reading) {
   return {
     id: 'reading',
-    label: 'Reading',
+    label: `WIND AT SAMPLED LOCATION · ${reading.coordinates.replace(' · ', ' ')}`,
     lines: [
-      { id: 'coordinates', text: reading.coordinates },
-      { id: 'wind', text: reading.wind },
+      {
+        id: 'wind',
+        text: `${reading.wind} · ${reading.model} · valid ${reading.validTime}`,
+      },
       ...(reading.scalarValue
         ? [
             {
@@ -38,17 +44,8 @@ export function windReadingSection(reading) {
             },
           ]
         : []),
-      { id: 'model', text: reading.model },
-      {
-        id: 'valid',
-        text: reading.validTime ? `Valid ${reading.validTime}` : '',
-      },
-      { id: 'status', text: reading.status },
       { id: 'explanation', text: reading.explanation },
     ],
-    chips: windUnitChips(reading.units),
-    actions: [
-      { id: 'clear', label: 'Clear reading', params: { inspect: false } },
-    ],
+    clear: { params: { inspect: false } },
   };
 }

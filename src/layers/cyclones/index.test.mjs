@@ -355,7 +355,7 @@ test('refresh preserves selection intent, including explicit clears and missing 
     assert.equal(h.layer.getDiagnostics().selectionIntent, 'cleared');
     await h.layer.update();
     assert.equal(h.selection, null);
-    assert.equal(h.layer.getRowControls().summary.detail, 'No storm selected');
+    assert.equal(h.layer.getRowControls().summary.detail, '1 active storm');
   }
   h.layer.disable();
   assert.equal(h.layer.getDiagnostics().selectionIntent, 'auto');
@@ -473,11 +473,14 @@ test('advisory selection uses accessible row descriptors and shared camera hando
   assert.equal(controls.readout, true);
   assert.deepEqual(controls.chips, []);
   assert.equal(controls.summary.coverage, 'Atlantic + E/C Pacific');
-  assert.equal(controls.summary.advisoryUrl, storm().advisoryUrl);
+  assert.equal(controls.summary.actions[0].href, storm().advisoryUrl);
   assert.equal(controls.summary.lines.length, 3);
-  assert.deepEqual(controls.summary.sections, [
-    { id: 'storms', label: 'Storms', list: controls.list },
+  assert.deepEqual(controls.summary.settings, []);
+  assert.deepEqual(controls.summary.actions, [
+    { id: 'advisory', label: 'Official advisory ↗', href: storm().advisoryUrl },
   ]);
+  assert.match(controls.summary.compact, /2 active storms · .* selected/);
+  assert.equal(controls.summary.sections, undefined);
   assert.match(controls.list.ariaLabel, /NHC/);
   assert.equal(controls.list.items.length, 2);
   assert.equal(controls.list.items[0].active, true);

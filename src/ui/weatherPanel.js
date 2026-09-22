@@ -3,14 +3,15 @@ import { createRailTimeline } from './railTimeline.js';
 
 // Remounting controls must not reopen a panel the user already collapsed.
 const appearedDocuments = new WeakSet();
+const openDocuments = new WeakMap();
 const ORDER = [
+  'weather-cyclones',
   'wind',
   'weather-radar',
   'weather-satellite',
   'weather-lightning',
-  'weather-cyclones',
 ];
-const OBSERVED = new Set(ORDER.slice(1, 4));
+const OBSERVED = new Set(ORDER.slice(2));
 const utc = (time) =>
   Number.isFinite(Date.parse(time))
     ? `${new Date(time).toISOString().slice(5, 16).replace('T', ' ')} UTC`
@@ -49,29 +50,52 @@ export function createWeatherPanel({
   timelineHost.hidden = true;
   const cardsHost = document.createElement('div');
   cardsHost.className = 'weather-cards';
-  root.appendChild(timelineHost);
-  root.appendChild(cardsHost);
+  const observedGroup = document.createElement('section');
+  observedGroup.className = 'weather-observed-group';
+  observedGroup.setAttribute('aria-label', 'Observed history');
+  const heading = document.createElement('h3');
+  heading.className = 'panel-title';
+  heading.textContent = 'Observed history';
+  const scope = document.createElement('div');
+  scope.className = 'weather-observed-scope';
+  const observedCardsHost = document.createElement('div');
+  observedCardsHost.className = 'weather-cards';
+  observedGroup.append(heading, scope, timelineHost, observedCardsHost);
+  root.append(cardsHost, observedGroup);
   container.appendChild(root);
   const panel = container.closest?.('#weather-panel');
   const count = panel?.querySelector('#weather-panel-count');
   let entries = [];
   let destroyed = false;
+  let previousIds = null;
+  let hasAppeared = false;
+  let openId = openDocuments.get(document) || null;
   const timeline = createRailTimeline({
     container: timelineHost,
     document,
     sliderClassName: 'weather-timeline',
+    heading: false,
     onCommit: (tick) => clock?.setTarget(tick),
     onPreview: historyTime,
     onStep: (direction) => clock?.step(direction),
     onLatest: () => clock?.latest(),
     onPlay: () => clock?.togglePlay(),
   });
-  const cards = createRailCards({
-    container: cardsHost,
+  const cardOptions = {
     document,
     cardClassName: 'weather-card',
     badgeClassName: 'weather-coverage',
     onParams: (id, params) => setLayerParams(id, params, { origin: 'user' }),
+    onOpen: (id) => {
+      openId = id;
+      openDocuments.set(document, id);
+      render();
+    },
+  };
+  const cards = createRailCards({ ...cardOptions, container: cardsHost });
+  const observedCards = createRailCards({
+    ...cardOptions,
+    container: observedCardsHost,
   });
   const render = () => {
     if (destroyed) return;
@@ -83,8 +107,15 @@ export function createWeatherPanel({
     const active = entries
       .filter(({ summary }) => summary)
       .sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
-    const showTimeline =
-      active.some(({ id }) => OBSERVED.has(id)) && state.timeline.length >= 2;
+    const observed = active.filter(({ id }) => OBSERVED.has(id));
+    const showTimeline = observed.length > 0;
+    set(observedGroup, 'hidden', !showTimeline);
+    const names = {
+      'weather-radar': 'Rain radar',
+      'weather-satellite': 'Satellite clouds',
+      'weather-lightning': 'Lightning density',
+    };
+    set(scope, 'textContent', observed.map(({ id }) => names[id]).join(' · '));
     set(timelineHost, 'hidden', !showTimeline);
     const index =
       state.mode === 'latest'
@@ -100,64 +131,81 @@ export function createWeatherPanel({
       index,
       mode: state.mode,
       playing: Boolean(state.playing),
-      disabled: !showTimeline,
+      disabled: !showTimeline || state.timeline.length < 2,
       readout:
         state.mode === 'latest'
           ? 'LATEST · newest per product'
           : historyTime(state.target),
     });
-    cards.update(
-      active.map(({ id, summary, legend = [] }) => {
-        let detail = summary.detail;
-        const product = state.products.find((item) => item.id === id);
-        if (OBSERVED.has(id)) {
-          const shown = product?.shown ?? summary.shownTime;
-          if (state.mode === 'history' && product?.selected === null) {
-            const gap = summary.maxGapMinutes || 30;
-            detail = `No frame within ${gap < 60 ? `${gap} min` : `${gap / 60} h`} of ${utc(state.target).slice(6)}`;
-          } else if (shown) {
-            detail = dated(shown);
-            if (state.mode === 'history')
-              detail +=
-                Date.parse(shown) === Date.parse(state.target)
-                  ? ' · synced'
-                  : ' · nearest';
-          }
-        } else if (id === 'wind') {
-          detail = `Forecast · valid ${utc(summary.validTime)} · issued ${utc(summary.issuedTime)}`;
-          if (state.mode === 'history') detail += ' · Does not follow history';
+    const models = active.map(({ id, summary, legend = [], list }) => {
+      let detail = summary.detail;
+      const product = state.products.find((item) => item.id === id);
+      if (OBSERVED.has(id)) {
+        const shown = product?.shown ?? summary.shownTime;
+        if (state.mode === 'history' && product?.selected === null) {
+          const gap = summary.maxGapMinutes || 30;
+          detail = `No frame within ${gap < 60 ? `${gap} min` : `${gap / 60} h`} of ${utc(state.target).slice(6)}`;
+        } else if (shown) {
+          detail = dated(shown);
+          if (state.mode === 'history')
+            detail +=
+              Date.parse(shown) === Date.parse(state.target)
+                ? ' · synced'
+                : ' · nearest';
         }
-        const lines = [
-          { id: 'time', text: detail, muted: true },
-          { id: 'status', text: summary.status },
-        ];
-        for (const line of summary.lines || []) lines.push(line);
-        const actions = [];
-        if (summary.advisoryUrl)
-          actions.push({
-            id: 'advisory',
-            label: 'Official advisory ↗',
-            title: 'Open the official NHC advisory',
-            href: summary.advisoryUrl,
-          });
-        for (const action of summary.actions || [])
-          actions.push({ ...action, onClick: () => onAction(id, action.id) });
-        return {
-          id,
-          title: summary.label,
-          badge: summary.coverage,
-          lines,
-          legend: {
-            colors: legend.map(({ color }) => color),
-            labels: legend.map(({ label }) => label),
-            units: id === 'weather-cyclones' ? '' : summary.units,
-            zeroIndex: legend.findIndex(({ label }) => label === '0'),
-          },
-          sections: summary.sections,
-          actions,
-        };
-      }),
-    );
+      } else if (id === 'wind') {
+        detail = `Forecast · valid ${utc(summary.validTime)} · issued ${utc(summary.issuedTime)}`;
+        if (state.mode === 'history') detail += ' · Does not follow history';
+      }
+      const lines = [
+        { id: 'time', text: detail, muted: true },
+        { id: 'status', text: summary.status },
+      ];
+      for (const line of summary.lines || []) lines.push(line);
+      const actions = (summary.actions || []).map((action) => ({
+        ...action,
+        onClick: action.onClick || (() => onAction(id, action.id)),
+      }));
+      const legendBlock = {
+        id: 'legend',
+        type: 'legend',
+        legend: {
+          categorical: id === 'weather-cyclones',
+          colors: legend.map(({ color }) => color),
+          labels: legend.map(({ label }) => label),
+          units: id === 'weather-cyclones' ? '' : summary.units,
+          zeroIndex: legend.findIndex(({ label }) => label === '0'),
+        },
+      };
+      const blocks = [
+        ...(id === 'weather-cyclones' && list?.items?.length
+          ? [{ id: 'storms', type: 'list', list }]
+          : []),
+        { id: 'details', type: 'lines', lines },
+        ...(legend.length ? [legendBlock] : []),
+        ...(summary.settings?.length
+          ? [{ id: 'settings', type: 'settings', settings: summary.settings }]
+          : []),
+        ...(actions.length
+          ? [{ id: 'actions', type: 'actions', actions }]
+          : []),
+        ...(summary.result ? [{ ...summary.result, type: 'result' }] : []),
+      ];
+      return {
+        id,
+        title: summary.label,
+        badge: summary.coverage,
+        open: id === openId,
+        compact:
+          summary.status ||
+          summary.compact ||
+          (OBSERVED.has(id) ? detail?.replace(/^\d{2}-\d{2} /, '') : detail),
+        compactStatus: Boolean(summary.status),
+        blocks,
+      };
+    });
+    cards.update(models.filter(({ id }) => !OBSERVED.has(id)));
+    observedCards.update(models.filter(({ id }) => OBSERVED.has(id)));
     const hidden = active.length === 0;
     set(root, 'hidden', hidden);
     if (count) set(count, 'textContent', String(active.length));
@@ -177,7 +225,29 @@ export function createWeatherPanel({
   const unsubscribe = clock?.subscribe(render);
   return {
     update(nextEntries) {
-      entries = nextEntries;
+      entries = nextEntries.filter(({ summary }) => summary);
+      const ids = new Set(entries.map(({ id }) => id));
+      const ordered = [...entries].sort(
+        (a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id),
+      );
+      const added =
+        previousIds && entries.filter(({ id }) => !previousIds.has(id));
+      if (hasAppeared && added?.length) {
+        openId = added.at(-1).id;
+        openDocuments.set(document, openId);
+      } else if (ids.size && !ids.has(openId)) {
+        openId =
+          (!hasAppeared &&
+            !openId &&
+            ordered.find(
+              ({ id, list }) =>
+                id === 'weather-cyclones' && list?.items?.length,
+            )?.id) ||
+          ordered[0]?.id ||
+          null;
+      }
+      if (ids.size) hasAppeared = true;
+      previousIds = ids;
       render();
     },
     destroy() {
@@ -185,6 +255,7 @@ export function createWeatherPanel({
       unsubscribe?.();
       timeline.destroy();
       cards.destroy();
+      observedCards.destroy();
       root.remove();
       if (panel) set(panel, 'hidden', true);
       if (count) set(count, 'textContent', '0');

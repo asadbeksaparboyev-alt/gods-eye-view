@@ -3,32 +3,49 @@ import assert from 'node:assert/strict';
 import { createRailCards } from './railCards.js';
 import { railFixture } from './railTestFixture.mjs';
 
+const legend = {
+  colors: ['#112233', '#ffffff', '#abcdef'],
+  labels: ['-10', '0', '10'],
+  units: '°C',
+  zeroIndex: 1,
+};
 const card = {
   id: 'a',
   title: 'Temperature',
   badge: 'Global',
-  lines: [{ id: 'status', text: '' }],
-  legend: {
-    colors: ['#112233', '#ffffff', '#abcdef'],
-    labels: ['-10', '0', '10'],
-    units: '°C',
-    zeroIndex: 1,
-  },
-  actions: [{ id: 'open', label: 'Controls' }],
+  open: true,
+  blocks: [
+    { id: 'details', type: 'lines', lines: [{ id: 'status', text: '' }] },
+    { id: 'legend', type: 'legend', legend },
+    {
+      id: 'actions',
+      type: 'actions',
+      actions: [{ id: 'view', label: 'View coverage' }],
+    },
+  ],
 };
-test('cards reconcile ordered articles, lines and actions without redundant DOM writes', () => {
+test('keyed cards and optional blocks reorder without redundant writes', () => {
   let writes = 0;
   const f = railFixture(() => writes++);
   const view = createRailCards(f);
   view.update([card]);
   const article = f.container.children[0];
   assert.equal(article.tagName, 'ARTICLE');
-  const button = f.find((n) => n.dataset.actionId === 'open');
-  const status = f.find((n) => n.dataset.lineId === 'status');
+  const header = article.children[0];
+  assert.equal(header.tagName, 'BUTTON');
+  assert.equal(header.getAttribute('aria-expanded'), 'true');
+  assert.ok(header.getAttribute('aria-controls'));
   for (const cards of [
     [card],
-    [{ ...card, lines: [{ id: 'status', text: '<img onerror=alert(1)>' }] }],
-    [card, { ...card, id: 'b' }],
+    [
+      {
+        ...card,
+        blocks: [
+          { id: 'summary', type: 'summary', text: '<img onerror=alert(1)>' },
+        ],
+      },
+    ],
+    [card, { ...card, id: 'b', open: false }],
     [{ ...card, id: 'b' }, card],
     [],
   ]) {
@@ -37,39 +54,48 @@ test('cards reconcile ordered articles, lines and actions without redundant DOM 
     view.update(cards);
     assert.equal(writes, 0);
   }
-  view.update([card]);
-  view.update([{ ...card, title: 'Changed' }]);
-  const current = f.container.children[0];
-  view.update([{ ...card, title: 'Changed again' }]);
-  assert.equal(f.container.children[0], current);
-  assert.equal(status.children.length, 0);
-  assert.equal(button.tagName, 'BUTTON');
+  view.update([{ ...card, blocks: [...card.blocks].reverse() }]);
+  assert.deepEqual(
+    f.container.children[0].children[1].children.map((n) => n.dataset.blockId),
+    ['actions', 'legend', 'details'],
+  );
   view.destroy();
   assert.equal(f.container.children.length, 0);
+  assert.equal(createRailCards(), null);
 });
-test('actions retain focus targets and dispatch current callbacks; links are safe new-tab anchors', () => {
+test('footer buttons retain focus and current callbacks; links use safe new tabs', () => {
   const f = railFixture();
   const view = createRailCards(f);
   const calls = [];
+  const model = (actions) => ({
+    ...card,
+    blocks: [{ id: 'actions', type: 'actions', actions }],
+  });
   view.update([
-    {
-      ...card,
-      actions: [{ id: 'open', label: 'First', onClick: () => calls.push(1) }],
-    },
+    model([{ id: 'view', label: 'First', onClick: () => calls.push(1) }]),
   ]);
-  const button = f.find((n) => n.dataset.actionId === 'open');
+  const button = f.find((n) => n.dataset.actionId === 'view');
+  button.focus();
   view.update([
-    {
-      ...card,
-      actions: [
-        { id: 'open', label: 'Second', onClick: () => calls.push(2) },
-        { id: 'link', label: 'Source', href: 'https://example.org/advisory' },
-      ],
-    },
+    model([
+      {
+        id: 'view',
+        label: 'Read wind here',
+        hint: 'at map center',
+        onClick: () => calls.push(2),
+      },
+      {
+        id: 'link',
+        label: 'Official advisory ↗',
+        href: 'https://example.org/advisory',
+      },
+    ]),
   ]);
+  assert.equal(f.document.activeElement, button);
+  assert.equal(button.parent.tagName, 'FOOTER');
   assert.equal(
-    f.find((n) => n.dataset.actionId === 'open'),
-    button,
+    f.find((n) => n.className === 'rail-card-action-hint').textContent,
+    'at map center',
   );
   button.click();
   assert.deepEqual(calls, [2]);
@@ -77,54 +103,35 @@ test('actions retain focus targets and dispatch current callbacks; links are saf
   assert.equal(link.tagName, 'A');
   assert.equal(link.target, '_blank');
   assert.equal(link.rel, 'noopener');
+  view.update([
+    model([
+      {
+        id: 'view',
+        label: 'Read wind here',
+        disabled: true,
+        onClick: () => calls.push(3),
+      },
+    ]),
+  ]);
+  button.click();
+  assert.deepEqual(calls, [2]);
   view.destroy();
   button.click();
   assert.deepEqual(calls, [2]);
 });
-test('legend validates colors and locates the freezing anchor by physical stops', () => {
-  const f = railFixture();
-  const view = createRailCards(f);
-  view.update([card]);
-  const zero = f.find((n) => n.className === 'rail-card-zero');
-  assert.equal(zero.hidden, false);
-  assert.equal(zero.style.left, '50%');
-  view.update([
-    {
-      ...card,
-      legend: {
-        colors: Array(10).fill('#abcdef'),
-        labels: Array.from({ length: 10 }, (_, i) => String(i * 10 - 40)),
-        units: '°C',
-        zeroIndex: 4,
-      },
-    },
-  ]);
-  assert.ok(Math.abs(parseFloat(zero.style.left) - 44.444444) < 0.001);
-  view.update([{ ...card, legend: { ...card.legend, units: 'km/h' } }]);
-  assert.equal(zero.hidden, true);
-  view.update([
-    {
-      ...card,
-      legend: {
-        ...card.legend,
-        colors: ['url(https://example.org)', '#ffffff'],
-      },
-    },
-  ]);
-  const ramp = f.find((n) => n.className === 'rail-card-ramp');
-  assert.equal(ramp.hidden, true);
-  assert.equal(ramp.style.background, '');
-  view.destroy();
-  assert.equal(createRailCards(), null);
-});
-
-test('CSSOM color and percentage normalization does not trigger repeated legend writes', () => {
+test('legend validates colors, preserves the freezing anchor and ignores CSSOM normalization', () => {
   let writes = 0;
   const f = railFixture(() => writes++);
   const view = createRailCards(f);
-  view.update([card]);
-  const ramp = f.find((node) => node.className === 'rail-card-ramp');
-  const zero = f.find((node) => node.className === 'rail-card-zero');
+  const show = (legend) =>
+    view.update([
+      { ...card, blocks: [{ id: 'legend', type: 'legend', legend }] },
+    ]);
+  show(legend);
+  const zero = f.find((n) => n.className === 'rail-card-zero');
+  const ramp = f.find((n) => n.className === 'rail-card-ramp');
+  assert.equal(zero.hidden, false);
+  assert.equal(zero.style.left, '50%');
   Object.defineProperty(ramp.style, 'background', {
     get: () =>
       'linear-gradient(to right, rgb(17, 34, 51), rgb(255, 255, 255), rgb(171, 205, 239))',
@@ -141,12 +148,25 @@ test('CSSOM color and percentage normalization does not trigger repeated legend 
     configurable: true,
   });
   writes = 0;
-  view.update([card]);
+  show(legend);
   assert.equal(writes, 0);
+  delete ramp.style.background;
+  delete zero.style.left;
+  show({
+    ...legend,
+    colors: Array(10).fill('#abcdef'),
+    labels: Array.from({ length: 10 }, (_, i) => String(i * 10 - 40)),
+    zeroIndex: 4,
+  });
+  assert.ok(Math.abs(parseFloat(zero.style.left) - 44.444444) < 0.001);
+  show({ ...legend, units: 'km/h' });
+  assert.equal(zero.hidden, true);
+  show({ ...legend, colors: ['url(https://example.org)', '#ffffff'] });
+  assert.equal(ramp.hidden, true);
+  assert.equal(ramp.style.background, '');
   view.destroy();
 });
-
-test('sections retain focused chips, dispatch current params and reconcile active storm items', () => {
+test('labelled rows, lists and results retain focus and dispatch current params', () => {
   let writes = 0;
   const f = railFixture(() => writes++);
   const calls = [];
@@ -154,123 +174,86 @@ test('sections retain focused chips, dispatch current params and reconcile activ
     ...f,
     onParams: (...args) => calls.push(args),
   });
-  const settings = {
-    id: 'settings',
-    label: 'Settings',
-    chips: [{ id: 'motion', label: 'Pause', params: { paused: true } }],
-  };
-  const storms = {
-    id: 'storms',
-    label: 'Storms',
-    list: {
-      ariaLabel: 'Storms',
-      items: [
-        {
-          id: 'a',
-          lead: 'AL',
-          text: 'Storm A',
-          active: true,
-          params: { stormId: 'a', focus: true },
-        },
-        { id: 'b', text: 'Storm B', params: { stormId: 'b', focus: true } },
-      ],
-    },
-  };
-  const reading = {
-    id: 'reading',
-    label: 'Reading',
-    lines: [{ id: 'coordinates', text: '<b>41°N</b>' }],
-    actions: [
-      { id: 'clear', label: 'Clear reading', params: { inspect: false } },
-    ],
-  };
-  let model = { ...card, sections: [settings, storms, reading] };
-  view.update([model]);
-  const section = (id) => f.find((n) => n.dataset.sectionId === id);
-  assert.equal(section('settings').children[1].hidden, true);
-  assert.equal(section('storms').children[1].hidden, true);
-  assert.equal(section('reading').children[1].hidden, false);
-  section('settings').children[0].click();
-  const chip = f.find((n) => n.dataset.chipId === 'motion');
-  chip.focus();
-  model = {
-    ...model,
-    sections: [
+  const model = (paused = false) => ({
+    ...card,
+    blocks: [
       {
-        ...settings,
-        chips: [
+        id: 'storms',
+        type: 'list',
+        list: {
+          ariaLabel: 'Storms',
+          items: [
+            {
+              id: 'a',
+              text: 'Storm A',
+              active: !paused,
+              params: { stormId: 'a', focus: true },
+            },
+            {
+              id: 'b',
+              text: 'Storm B',
+              active: paused,
+              params: { stormId: 'b', focus: true },
+            },
+          ],
+        },
+      },
+      {
+        id: 'settings',
+        type: 'settings',
+        settings: [
           {
             id: 'motion',
-            label: 'Resume',
-            params: { paused: false },
-            active: true,
+            label: 'MOTION',
+            chips: [
+              {
+                id: 'motion',
+                label: paused ? 'Resume' : 'Pause',
+                params: { paused: !paused },
+              },
+            ],
           },
         ],
       },
       {
-        ...storms,
-        list: {
-          ...storms.list,
-          items: storms.list.items.map((item) => ({
-            ...item,
-            active: item.id === 'b',
-          })),
-        },
+        id: 'reading',
+        type: 'result',
+        label: 'WIND AT SAMPLED LOCATION · 41°N 87°W',
+        lines: [{ id: 'wind', text: '<b>18 km/h</b>' }],
+        clear: { params: { inspect: false } },
       },
-      reading,
     ],
-  };
-  view.update([model]);
+  });
+  view.update([model()]);
+  const setting = f.find((n) => n.dataset.blockId === 'motion');
+  assert.equal(setting.children[0].textContent, 'MOTION');
+  assert.equal(setting.children[1].getAttribute('role'), 'group');
+  assert.equal(setting.children[1].getAttribute('aria-label'), 'MOTION');
+  const chip = f.find((n) => n.dataset.chipId === 'motion');
+  chip.focus();
+  view.update([model(true)]);
   assert.equal(f.document.activeElement, chip);
   chip.click();
   assert.deepEqual(calls.at(-1), ['a', { paused: false }]);
-  const stormB = f.find(
+  const storm = f.find(
     (n) => n.tagName === 'BUTTON' && n.dataset.listItemId === 'b',
   );
-  assert.equal(stormB.getAttribute('aria-pressed'), 'true');
-  stormB.click();
+  assert.equal(storm.getAttribute('aria-pressed'), 'true');
+  storm.click();
   assert.deepEqual(calls.at(-1), ['a', { stormId: 'b', focus: true }]);
   const clear = f.find((n) => n.dataset.actionId === 'clear');
+  assert.equal(clear.textContent, '×');
+  assert.equal(clear.getAttribute('aria-label'), 'Clear reading');
   clear.click();
   assert.deepEqual(calls.at(-1), ['a', { inspect: false }]);
-  assert.equal(
-    f.find((n) => n.dataset.lineId === 'coordinates').children.length,
-    0,
-  );
+  assert.equal(f.find((n) => n.dataset.lineId === 'wind').children.length, 0);
   writes = 0;
-  view.update([model]);
+  view.update([model(true)]);
   assert.equal(writes, 0);
   view.destroy();
   const before = calls.length;
   chip.click();
   clear.click();
-  stormB.click();
+  storm.click();
   assert.equal(calls.length, before);
-});
-
-test('disclosure choices persist across removal, re-enable and remount for the page', () => {
-  const f = railFixture();
-  const model = {
-    ...card,
-    sections: [
-      { id: 'settings', label: 'Settings', chips: [] },
-      { id: 'reading', label: 'Reading', lines: [] },
-    ],
-  };
-  let view = createRailCards(f);
-  const toggle = (id) => f.find((n) => n.dataset.sectionId === id).children[0];
-  view.update([model]);
-  toggle('settings').click();
-  toggle('reading').click();
-  view.update([]);
-  view.update([model]);
-  assert.equal(toggle('settings').getAttribute('aria-expanded'), 'true');
-  assert.equal(toggle('reading').getAttribute('aria-expanded'), 'false');
-  assert.ok(toggle('reading').getAttribute('aria-controls'));
-  view.destroy();
-  view = createRailCards(f);
-  view.update([model]);
-  assert.equal(toggle('settings').getAttribute('aria-expanded'), 'true');
-  assert.equal(toggle('reading').getAttribute('aria-expanded'), 'false');
-  view.destroy();
 });

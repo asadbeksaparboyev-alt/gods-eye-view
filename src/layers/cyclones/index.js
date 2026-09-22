@@ -318,14 +318,28 @@ export function createCyclonesLayer({
         : empty
           ? 'No active NHC/CPHC systems'
           : snapshot?.storms.length
-            ? 'No storm selected'
-            : 'Advisories unavailable';
+            ? `${snapshot.storms.length} active storm${snapshot.storms.length === 1 ? '' : 's'}`
+            : loading
+              ? 'Loading advisories…'
+              : 'Advisories unavailable';
       const controls = {
         readout: true,
         summary: {
           label: 'Cyclones · NHC / CPHC',
           coverage: 'Atlantic + E/C Pacific',
-          advisoryUrl: storm?.advisoryUrl,
+          compact: snapshot?.storms.length
+            ? `${snapshot.storms.length} active storm${snapshot.storms.length === 1 ? '' : 's'}${storm ? ` · ${storm.name} selected` : ''}`
+            : detail,
+          actions: storm?.advisoryUrl
+            ? [
+                {
+                  id: 'advisory',
+                  label: 'Official advisory ↗',
+                  href: storm.advisoryUrl,
+                },
+              ]
+            : [],
+          settings: [],
           lines: storm
             ? [
                 {
@@ -368,9 +382,6 @@ export function createCyclonesLayer({
         infoTitle:
           'Select a storm on the map, or choose a storm in the list to select it and move the camera. Click empty map space to clear the selection. NOAA NHC/CPHC advisory context. The cone describes forecast center-track uncertainty, not storm size or the full hazard area. Forecast point labels are source lead hours, not times computed from advisory issuance. Geometry follows the surface; height is not weather altitude. Consult the official advisory.',
       };
-      controls.summary.sections = [
-        { id: 'storms', label: 'Storms', list: controls.list },
-      ];
       return controls;
     },
     setRowControlsListener(value) {

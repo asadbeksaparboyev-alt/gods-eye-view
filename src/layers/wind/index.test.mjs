@@ -301,7 +301,7 @@ test('weather summary describes the selected forecast and count remains numeric'
   layer.destroy();
 });
 
-test('inspection marker clears with dismissal, changed fields/models and disable', async () => {
+test('sample stays fixed across model, field and unit changes; dismissal and disable clear marker', async () => {
   const nodes = [];
   let listener;
   let samples = 0;
@@ -323,7 +323,7 @@ test('inspection marker clears with dismissal, changed fields/models and disable
   };
   const rendering = Object.fromEntries(['attach', 'start', 'stop', 'clear', 'destroy', 'setField'].map(name => [name, () => {}]));
   const layer = createWindLayer({
-    feed: { getSnapshot: async () => complete('gfs') },
+    feed: { getSnapshot: async ({ model }) => complete(model) },
     cesium: {
       Cartesian2: class {}, Ellipsoid: { WGS84: {} }, SceneMode: { SCENE3D: 3 },
       Cartographic: { fromCartesian: point => point }, Math: { toDegrees: value => value },
@@ -346,20 +346,34 @@ test('inspection marker clears with dismissal, changed fields/models and disable
   assert.equal(changed.coordinates, captured.coordinates);
   assert.match(changed.wind, /mph/);
   assert.equal(samples, 1, 'units do not resample');
-  assert.equal(layer.getRowControls().summary.sections.at(-1).id, 'reading');
+  assert.equal(layer.getRowControls().summary.result.id, 'reading');
+  assert.deepEqual(layer.getRowControls().summary.settings.map(({ label }) => label), ['MODEL', 'FIELD', 'UNITS', 'MOTION']);
   assert.equal(nodes.length, 1);
   assert.equal(typeof listener, 'function');
-  for (const change of [() => layer.setParams({ inspect: false }), () => layer.setParams({ overlay: 'speed' }), () => layer.setParams({ model: 'ifs' }), () => layer.disable()]) {
+  viewer.camera.pickEllipsoid = () => { samples++; return { longitude: 70, latitude: 20 }; };
+  layer.setParams({ overlay: 'speed' });
+  assert.equal(layer.getRowControls().summary.reading.coordinates, captured.coordinates);
+  layer.setParams({ model: 'ifs' });
+  await new Promise(resolve => setImmediate(resolve));
+  const resampled = layer.getRowControls().summary.reading;
+  assert.equal(resampled.coordinates, captured.coordinates);
+  assert.equal(resampled.model, 'ECMWF');
+  assert.equal(resampled.position, captured.position);
+  assert.equal(samples, 1, 'model and field changes never sample the moved camera');
+  assert.match(layer.getRowControls().summary.result.lines[0].text, /ECMWF · valid/);
+  await layer.update();
+  assert.equal(layer.getRowControls().summary.reading.coordinates, captured.coordinates);
+  layer.setParams({ inspect: true });
+  assert.equal(layer.getRowControls().summary.reading.coordinates, '20.00°N · 70.00°E');
+  assert.equal(samples, 2, 'the next explicit read samples the new center');
+  for (const change of [() => layer.setParams({ inspect: false }), () => layer.disable()]) {
     layer.setParams({ inspect: true });
     assert.equal(nodes.length, 1);
-    assert.equal(layer.getRowControls().summary.reading.coordinates, '0.00°N · 0.00°E');
     change();
     assert.equal(nodes.length, 0);
     assert.equal(layer.getRowControls().summary.reading, null);
-    assert.equal(layer.getRowControls().summary.sections.some(({ id }) => id === 'reading'), false);
+    assert.equal(layer.getRowControls().summary.result, null);
     assert.equal(listener, null);
-    await Promise.resolve();
-    await Promise.resolve();
   }
   layer.destroy();
 });

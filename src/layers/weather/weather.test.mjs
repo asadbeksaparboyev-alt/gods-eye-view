@@ -1444,7 +1444,7 @@ test('satellite mode chips restage history without changing time or latest-follo
       .getRowControls()
       .chips.slice(0, 4)
       .map((chip) => chip.label),
-    ['N. America', 'Global', 'Clouds only', 'Full image'],
+    ['N. America', 'Global', 'Clouds only', 'Full'],
   );
   h.stages[2].finish();
   await flush();
@@ -1732,9 +1732,19 @@ test('observed descriptors keep configuration only and label satellite clouds by
     const controls = h.layer.getRowControls();
     assert.equal(controls.readout, true);
     assert.equal(controls.summary.coverage, coverage);
-    assert.deepEqual(controls.summary.sections, [
-      { id: 'settings', label: 'Settings', chips: controls.chips },
+    assert.equal(controls.summary.sections, undefined);
+    assert.deepEqual(
+      controls.summary.settings.map(({ label }) => label),
+      id === 'weather-satellite' ? ['REGION', 'IMAGE', 'OPACITY'] : ['OPACITY'],
+    );
+    assert.deepEqual(
+      controls.summary.settings.flatMap(({ chips }) => chips),
+      controls.chips.filter(({ id }) => id !== 'coverage'),
+    );
+    assert.deepEqual(controls.summary.actions, [
+      controls.chips.find(({ id }) => id === 'coverage'),
     ]);
+    assert.deepEqual(controls.summary.actions[0].params, { focus: true });
     assert.equal(
       controls.chips.some(({ id }) =>
         ['previous', 'play', 'next', 'latest'].includes(id),

@@ -360,7 +360,7 @@ test('sample stays fixed across model, field and unit changes; dismissal and dis
   assert.equal(resampled.model, 'ECMWF');
   assert.equal(resampled.position, captured.position);
   assert.equal(samples, 1, 'model and field changes never sample the moved camera');
-  assert.match(layer.getRowControls().summary.result.lines[0].text, /ECMWF · valid/);
+  assert.match(layer.getRowControls().summary.result.lines.find(({ id }) => id === 'meta').text, /ECMWF · valid/);
   await layer.update();
   assert.equal(layer.getRowControls().summary.reading.coordinates, captured.coordinates);
   layer.setParams({ inspect: true });

@@ -360,8 +360,7 @@ export function createWindLayer({
           })),
           {
             id: 'read-wind',
-            label: 'Read wind here',
-            hint: 'at map center',
+            label: 'Read wind at map center',
             params: { inspect: true },
             disabled: loading || !manifest?.u || manifest?.unavailable,
             title:

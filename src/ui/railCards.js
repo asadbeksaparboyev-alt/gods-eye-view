@@ -44,7 +44,12 @@ export function createRailCards({
           element.dataset.cardId = card.id;
           const header = make('button', 'rail-card-header', element);
           header.type = 'button';
-          const title = make('span', 'rail-card-title', header);
+          const heading = make('span', 'rail-card-heading', header);
+          const icon = make('span', 'data-icon', heading);
+          icon.setAttribute('aria-hidden', 'true');
+          const title = make('span', 'rail-card-title', heading);
+          const disclosure = make('span', 'rail-card-disclosure', heading);
+          disclosure.setAttribute('aria-hidden', 'true');
           const badge = make(
             'span',
             `rail-card-badge${badgeClassName ? ` ${badgeClassName}` : ''}`,
@@ -61,14 +66,29 @@ export function createRailCards({
           });
           const click = () => onOpen(card.id);
           header.addEventListener('click', click);
-          row = { element, header, title, badge, compact, body, blocks, click };
+          row = {
+            element,
+            header,
+            icon,
+            title,
+            disclosure,
+            badge,
+            compact,
+            body,
+            blocks,
+            click,
+          };
           rows.set(card.id, row);
         }
         set(row.title, 'textContent', card.title);
+        set(row.icon, 'textContent', card.icon || '');
+        set(row.icon, 'hidden', !card.icon);
         set(row.badge, 'textContent', card.badge || '');
         set(row.badge, 'hidden', !card.badge);
         const open = card.open !== false;
         set(row.element.dataset, 'open', String(open));
+        row.element.classList.toggle('is-open', open);
+        set(row.disclosure, 'textContent', open ? '▾' : '▸');
         if (row.header.getAttribute('aria-expanded') !== String(open))
           row.header.setAttribute('aria-expanded', String(open));
         set(row.body, 'hidden', !open);

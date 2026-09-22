@@ -30,11 +30,15 @@ export function windUnitChips(units) {
 export function windReadingResult(reading) {
   return {
     id: 'reading',
-    label: `WIND AT SAMPLED LOCATION · ${reading.coordinates.replace(' · ', ' ')}`,
+    label: `WIND AT ${reading.coordinates.replace(' · ', ' ')}`,
     lines: [
       {
         id: 'wind',
-        text: `${reading.wind} · ${reading.model} · valid ${reading.validTime}`,
+        text: reading.wind,
+      },
+      {
+        id: 'meta',
+        text: `${reading.model} · valid ${reading.validTime?.replace(/^\d{4}-/, '')}`,
       },
       ...(reading.scalarValue
         ? [

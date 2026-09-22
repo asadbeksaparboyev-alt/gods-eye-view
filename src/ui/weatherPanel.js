@@ -137,7 +137,7 @@ export function createWeatherPanel({
           ? 'LATEST · newest per product'
           : historyTime(state.target),
     });
-    const models = active.map(({ id, summary, legend = [], list }) => {
+    const models = active.map(({ id, icon, summary, legend = [], list }) => {
       let detail = summary.detail;
       const product = state.products.find((item) => item.id === id);
       if (OBSERVED.has(id)) {
@@ -193,6 +193,7 @@ export function createWeatherPanel({
       ];
       return {
         id,
+        icon,
         title: summary.label,
         badge: summary.coverage,
         open: id === openId,

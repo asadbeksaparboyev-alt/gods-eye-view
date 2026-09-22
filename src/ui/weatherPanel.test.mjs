@@ -5,6 +5,7 @@ import { railFixture } from './railTestFixture.mjs';
 const ticks = ['2026-09-22T01:00:00Z', '2026-09-22T01:05:00Z'];
 const wind = {
   id: 'wind',
+  icon: '🌬',
   summary: {
     label: 'Wind motion',
     coverage: 'Global · 1° grid',
@@ -14,6 +15,7 @@ const wind = {
 };
 const radar = {
   id: 'weather-radar',
+  icon: '◉',
   summary: { label: 'Rain radar', coverage: 'CONUS' },
 };
 function fixture(onWrite) {
@@ -272,6 +274,11 @@ test('a stored or shared collapse choice is not overridden on first appearance',
 
 test('settings, reading and footer actions pass the layer id, params and user origin', async () => {
   const { windReadingResult } = await import('../layers/wind/presentation.js');
+  const { createWindLayer } = await import('../layers/wind/index.js');
+  const layer = createWindLayer({ feed: { getSnapshot: async () => null } });
+  const action = layer.getRowControls().summary.actions[0];
+  assert.equal(action.label, 'Read wind at map center');
+  assert.equal(action.hint, undefined);
   const f = fixture();
   const calls = [];
   const view = createWeatherPanel({
@@ -279,10 +286,12 @@ test('settings, reading and footer actions pass the layer id, params and user or
     setLayerParams: (...args) => calls.push(args),
   });
   const reading = {
-    coordinates: '41.9°N · 87.6°W',
-    wind: '18.0 km/h from SW',
-    model: 'GFS',
-    validTime: '12:00 UTC',
+    coordinates: '26.59°N · 123.34°W',
+    wind: '6.0 m/s from N',
+    model: 'ECMWF',
+    validTime: '2026-09-22 06:00 UTC',
+    scalarLabel: 'Wind speed',
+    scalarValue: '6.0 m/s',
     explanation: 'Interpolated model forecast.',
   };
   const summary = {
@@ -296,14 +305,7 @@ test('settings, reading and footer actions pass the layer id, params and user or
         chips: [{ id: 'units-mph', label: 'mph', params: { units: 'mph' } }],
       },
     ],
-    actions: [
-      {
-        id: 'read-wind',
-        label: 'Read wind here',
-        hint: 'at map center',
-        params: { inspect: true },
-      },
-    ],
+    actions: [{ ...action, disabled: false }],
   };
   view.update([{ ...wind, summary }]);
   f.find((n) => n.dataset.actionId === 'read-wind').click();
@@ -314,10 +316,33 @@ test('settings, reading and footer actions pass the layer id, params and user or
     ['wind', { units: 'mph' }, { origin: 'user' }],
     ['wind', { inspect: false }, { origin: 'user' }],
   ]);
-  assert.match(
-    line(f, 'wind', 'wind').textContent,
-    /18.0 km\/h from SW · GFS · valid 12:00 UTC/,
+  const result = f.find((n) => n.className === 'rail-card-result');
+  const header = result.children[0];
+  assert.equal(header.className, 'rail-card-result-header');
+  assert.equal(header.children[0].textContent, 'WIND AT 26.59°N 123.34°W');
+  assert.equal(header.children[1].textContent, '×');
+  assert.equal(header.children[1].getAttribute('aria-label'), 'Clear reading');
+  assert.deepEqual(
+    result.children[1].children[0].children.map((n) => [
+      n.dataset.lineId,
+      n.textContent,
+    ]),
+    [
+      ['wind', '6.0 m/s from N'],
+      ['meta', 'ECMWF · valid 09-22 06:00 UTC'],
+      ['scalar', 'Wind speed · 6.0 m/s'],
+      ['explanation', 'Interpolated model forecast.'],
+    ],
   );
+  assert.equal(
+    f.find((n) => n.dataset.actionId === 'read-wind').textContent,
+    'Read wind at map center',
+  );
+  assert.equal(
+    f.find((n) => n.className === 'rail-card-action-hint').hidden,
+    true,
+  );
+  layer.destroy();
   const body = card(f, 'wind').children[1];
   assert.deepEqual(
     body.children.map((n) => n.dataset.blockId),
@@ -328,6 +353,7 @@ test('settings, reading and footer actions pass the layer id, params and user or
 
 const cyclone = {
   id: 'weather-cyclones',
+  icon: '◉',
   summary: {
     label: 'Cyclones',
     compact: '3 active storms · Fay selected',
@@ -346,10 +372,12 @@ const cyclone = {
 };
 const satellite = {
   id: 'weather-satellite',
+  icon: '☁',
   summary: { label: 'Satellite clouds' },
 };
 const lightning = {
   id: 'weather-lightning',
+  icon: 'ϟ',
   summary: { label: 'Lightning density' },
 };
 const opened = (f) =>
@@ -476,5 +504,28 @@ test('compact lines show observation age, forecast validity, storm selection or 
   ]);
   assert.equal(compact(radar.id).textContent, 'Map center outside coverage');
   assert.match(compact(radar.id).className, /status/);
+  view.destroy();
+});
+
+test('all five headers retain descriptor icons and disclosure state when opened or compact', () => {
+  const f = fixture();
+  const view = createWeatherPanel(f);
+  const entries = [cyclone, wind, radar, satellite, lightning];
+  view.update(entries);
+  for (const active of entries) {
+    clickHeader(f, active.id);
+    for (const entry of entries) {
+      const article = card(f, entry.id);
+      const open = entry === active;
+      assert.equal(article.dataset.open, String(open));
+      assert.equal(article.classList.contains('is-open'), open);
+      const heading = article.children[0].children[0];
+      assert.equal(heading.children[0].className, 'data-icon');
+      assert.equal(heading.children[0].textContent, entry.icon);
+      assert.equal(heading.children[0].hidden, false);
+      assert.equal(heading.children[1].textContent, entry.summary.label);
+      assert.equal(heading.children[2].textContent, open ? '▾' : '▸');
+    }
+  }
   view.destroy();
 });

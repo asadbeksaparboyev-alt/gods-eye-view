@@ -340,7 +340,11 @@ export class LayerPanel {
               'weather-cyclones',
             ].includes(layer.id),
         )
-        .map((layer) => ({ id: layer.id, ...this._rowControlsFor(layer.id) })),
+        .map((layer) => ({
+          id: layer.id,
+          icon: layer.icon,
+          ...this._rowControlsFor(layer.id),
+        })),
     );
   }
 
